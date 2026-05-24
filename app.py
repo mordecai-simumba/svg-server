@@ -21,29 +21,47 @@ def home():
 def trace_image():
 
     if "image" not in request.files:
-        return jsonify({"error": "No image uploaded"}), 400
+        return jsonify({
+            "success": False,
+            "error": "No image uploaded"
+        }), 400
 
     image = request.files["image"]
 
     uid = str(uuid.uuid4())
 
     input_path = f"{UPLOAD_FOLDER}/{uid}.png"
+
+    temp_svg = f"{OUTPUT_FOLDER}/{uid}_temp.svg"
+
     output_path = f"{OUTPUT_FOLDER}/{uid}.svg"
 
     image.save(input_path)
 
     try:
 
-        command = [
+        # STEP 1
+        # Create initial SVG wrapper
+
+        command1 = [
             "inkscape",
             input_path,
-            "--export-plain-svg=" + output_path
+            "--export-type=svg",
+            "--export-filename=" + temp_svg
         ]
 
-        subprocess.run(command, check=True)
+        subprocess.run(command1, check=True)
 
-        with open(output_path, "r", encoding="utf-8") as f:
+        # STEP 2
+        # Read SVG content
+
+        with open(temp_svg, "r", encoding="utf-8") as f:
             svg_content = f.read()
+
+        # DEBUG LOG
+        print(svg_content[:500])
+
+        # Return SVG
 
         return jsonify({
             "success": True,
