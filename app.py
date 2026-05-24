@@ -17,7 +17,7 @@ os.makedirs(OUTPUT_FOLDER, exist_ok=True)
 
 
 # =========================================================
-# MAIN SVG ENGINE
+# SVG ENGINE
 # =========================================================
 
 def image_to_svg(image_path, svg_path):
@@ -27,7 +27,9 @@ def image_to_svg(image_path, svg_path):
     if image is None:
         raise Exception("Failed to read image")
 
-    original = image.copy()
+    # =====================================================
+    # GRAYSCALE
+    # =====================================================
 
     gray = cv2.cvtColor(
         image,
@@ -35,7 +37,7 @@ def image_to_svg(image_path, svg_path):
     )
 
     # =====================================================
-    # NOISE REDUCTION
+    # BLUR (REDUCE NOISE)
     # =====================================================
 
     blur = cv2.GaussianBlur(
@@ -96,38 +98,7 @@ def image_to_svg(image_path, svg_path):
 '''
 
     # =====================================================
-    # LINE DETECTION
-    # =====================================================
-
-    lines = cv2.HoughLinesP(
-        cleaned,
-        1,
-        np.pi / 180,
-        threshold=80,
-        minLineLength=50,
-        maxLineGap=10
-    )
-
-    if lines is not None:
-
-        for line in lines:
-
-            x1, y1, x2, y2 = line[0]
-
-            svg_content += f'''
-<line
-    x1="{x1}"
-    y1="{y1}"
-    x2="{x2}"
-    y2="{y2}"
-    stroke="black"
-    stroke-width="2"
-    stroke-linecap="round"
-    opacity="0.95"/>
-'''
-
-    # =====================================================
-    # CONTOUR DETECTION
+    # CONTOUR DETECTION ONLY
     # =====================================================
 
     contours, hierarchy = cv2.findContours(
@@ -140,16 +111,16 @@ def image_to_svg(image_path, svg_path):
 
         area = cv2.contourArea(contour)
 
-        # ================================================
-        # REMOVE NOISE
-        # ================================================
+        # =================================================
+        # REMOVE TINY NOISE
+        # =================================================
 
         if area < 80:
             continue
 
-        # ================================================
-        # CONTOUR SIMPLIFICATION
-        # ================================================
+        # =================================================
+        # SIMPLIFY CONTOUR
+        # =================================================
 
         epsilon = (
             0.002 *
@@ -165,9 +136,9 @@ def image_to_svg(image_path, svg_path):
         if len(contour) < 3:
             continue
 
-        # ================================================
-        # BUILD SVG PATH
-        # ================================================
+        # =================================================
+        # MAIN PATH
+        # =================================================
 
         path = "M "
 
@@ -179,9 +150,9 @@ def image_to_svg(image_path, svg_path):
 
         path += "Z"
 
-        # ================================================
-        # SHADOW / 3D EFFECT
-        # ================================================
+        # =================================================
+        # SHADOW PATH (PSEUDO 3D)
+        # =================================================
 
         shadow_path = "M "
 
@@ -189,9 +160,13 @@ def image_to_svg(image_path, svg_path):
 
             x, y = point[0]
 
-            shadow_path += f"{x+3},{y+3} "
+            shadow_path += f"{x+2},{y+2} "
 
         shadow_path += "Z"
+
+        # =================================================
+        # SHADOW LAYER
+        # =================================================
 
         svg_content += f'''
 <path
@@ -203,9 +178,9 @@ def image_to_svg(image_path, svg_path):
     stroke-linejoin="round"/>
 '''
 
-        # ================================================
-        # MAIN PATH
-        # ================================================
+        # =================================================
+        # MAIN VECTOR PATH
+        # =================================================
 
         svg_content += f'''
 <path
@@ -216,88 +191,6 @@ def image_to_svg(image_path, svg_path):
     stroke-linecap="round"
     stroke-linejoin="round"
     filter="url(#shadow)"/>
-'''
-
-    # =====================================================
-    # GRID DETECTION
-    # =====================================================
-
-    horizontal_kernel = cv2.getStructuringElement(
-        cv2.MORPH_RECT,
-        (40, 1)
-    )
-
-    vertical_kernel = cv2.getStructuringElement(
-        cv2.MORPH_RECT,
-        (1, 40)
-    )
-
-    horizontal_lines = cv2.morphologyEx(
-        cleaned,
-        cv2.MORPH_OPEN,
-        horizontal_kernel
-    )
-
-    vertical_lines = cv2.morphologyEx(
-        cleaned,
-        cv2.MORPH_OPEN,
-        vertical_kernel
-    )
-
-    # =====================================================
-    # HORIZONTAL GRID LINES
-    # =====================================================
-
-    h_contours, _ = cv2.findContours(
-        horizontal_lines,
-        cv2.RETR_EXTERNAL,
-        cv2.CHAIN_APPROX_SIMPLE
-    )
-
-    for contour in h_contours:
-
-        x, y, w, h = cv2.boundingRect(contour)
-
-        if w < 100:
-            continue
-
-        svg_content += f'''
-<line
-    x1="{x}"
-    y1="{y}"
-    x2="{x+w}"
-    y2="{y}"
-    stroke="#BBBBBB"
-    stroke-width="1"
-    opacity="0.45"/>
-'''
-
-    # =====================================================
-    # VERTICAL GRID LINES
-    # =====================================================
-
-    v_contours, _ = cv2.findContours(
-        vertical_lines,
-        cv2.RETR_EXTERNAL,
-        cv2.CHAIN_APPROX_SIMPLE
-    )
-
-    for contour in v_contours:
-
-        x, y, w, h = cv2.boundingRect(contour)
-
-        if h < 100:
-            continue
-
-        svg_content += f'''
-<line
-    x1="{x}"
-    y1="{y}"
-    x2="{x}"
-    y2="{y+h}"
-    stroke="#BBBBBB"
-    stroke-width="1"
-    opacity="0.45"/>
 '''
 
     # =====================================================
@@ -316,7 +209,7 @@ def image_to_svg(image_path, svg_path):
 
 
 # =========================================================
-# API ROUTE
+# CONVERT ROUTE
 # =========================================================
 
 @app.route("/convert", methods=["POST"])
