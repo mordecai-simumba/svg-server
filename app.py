@@ -30,9 +30,7 @@ def trace_image():
 
     uid = str(uuid.uuid4())
 
-    input_path = f"{UPLOAD_FOLDER}/{uid}.png"
-
-    temp_svg = f"{OUTPUT_FOLDER}/{uid}_temp.svg"
+    input_path = f"{UPLOAD_FOLDER}/{uid}.jpg"
 
     output_path = f"{OUTPUT_FOLDER}/{uid}.svg"
 
@@ -40,28 +38,29 @@ def trace_image():
 
     try:
 
-        # STEP 1
-        # Create initial SVG wrapper
-
-        command1 = [
+        command = [
             "inkscape",
             input_path,
             "--export-type=svg",
-            "--export-filename=" + temp_svg
+            "--export-filename=" + output_path
         ]
 
-        subprocess.run(command1, check=True)
+        result = subprocess.run(
+            command,
+            capture_output=True,
+            text=True
+        )
 
-        # STEP 2
-        # Read SVG content
+        print(result.stdout)
+        print(result.stderr)
 
-        with open(temp_svg, "r", encoding="utf-8") as f:
+        if result.returncode != 0:
+
+            raise Exception(result.stderr)
+
+        with open(output_path, "r", encoding="utf-8") as f:
+
             svg_content = f.read()
-
-        # DEBUG LOG
-        print(svg_content[:500])
-
-        # Return SVG
 
         return jsonify({
             "success": True,
