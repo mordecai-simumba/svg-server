@@ -5,9 +5,14 @@ import cv2
 import numpy as np
 import os
 import uuid
+import gc
 
 app = Flask(__name__)
 CORS(app)
+
+# =========================================================
+# FOLDERS
+# =========================================================
 
 UPLOAD_FOLDER = "uploads"
 OUTPUT_FOLDER = "outputs"
@@ -15,69 +20,94 @@ OUTPUT_FOLDER = "outputs"
 os.makedirs(UPLOAD_FOLDER, exist_ok=True)
 os.makedirs(OUTPUT_FOLDER, exist_ok=True)
 
-
 # =========================================================
-# SVG ENGINE
+# IMAGE TO SVG ENGINE
 # =========================================================
 
 def image_to_svg(image_path, svg_path):
 
-    image = cv2.imread(image_path)
-
-    if image is None:
-        raise Exception("Failed to read image")
-
     # =====================================================
-    # GRAYSCALE
+    # LOAD IMAGE IN GRAYSCALE
     # =====================================================
 
-    gray = cv2.cvtColor(
-        image,
-        cv2.COLOR_BGR2GRAY
+    image = cv2.imread(
+        image_path,
+        cv2.IMREAD_GRAYSCALE
     )
 
+    if image is None:
+        raise Exception("Failed to load image")
+
     # =====================================================
-    # BLUR (REDUCE NOISE)
+    # RESIZE INSIDE SERVER
+    # REDUCES RAM MASSIVELY
     # =====================================================
 
-    blur = cv2.GaussianBlur(
-        gray,
-        (5, 5),
+    max_width = 600
+
+    height, width = image.shape
+
+    if width > max_width:
+
+        ratio = max_width / width
+
+        new_height = int(height * ratio)
+
+        image = cv2.resize(
+            image,
+            (max_width, new_height)
+        )
+
+    # =====================================================
+    # LIGHT BLUR
+    # =====================================================
+
+    image = cv2.GaussianBlur(
+        image,
+        (3, 3),
         0
     )
 
     # =====================================================
-    # ADAPTIVE THRESHOLD
+    # THRESHOLD
     # =====================================================
 
-    thresh = cv2.adaptiveThreshold(
-        blur,
+    _, thresh = cv2.threshold(
+        image,
+        180,
         255,
-        cv2.ADAPTIVE_THRESH_GAUSSIAN_C,
-        cv2.THRESH_BINARY_INV,
-        11,
-        2
+        cv2.THRESH_BINARY_INV
     )
 
     # =====================================================
-    # MORPHOLOGICAL CLEANUP
+    # LIGHT MORPHOLOGY
     # =====================================================
 
     kernel = np.ones((2, 2), np.uint8)
 
-    cleaned = cv2.morphologyEx(
+    thresh = cv2.morphologyEx(
         thresh,
-        cv2.MORPH_CLOSE,
+        cv2.MORPH_OPEN,
         kernel
     )
 
-    height, width = cleaned.shape
-
     # =====================================================
-    # SVG HEADER
+    # FIND CONTOURS
     # =====================================================
 
-    svg_content = f'''
+    contours, _ = cv2.findContours(
+        thresh,
+        cv2.RETR_EXTERNAL,
+        cv2.CHAIN_APPROX_SIMPLE
+    )
+
+    # =====================================================
+    # SVG SETUP
+    # =====================================================
+
+    height, width = image.shape
+
+    svg = f'''
 <svg xmlns="http://www.w3.org/2000/svg"
  width="{width}"
  height="{height}"
@@ -87,43 +117,37 @@ def image_to_svg(image_path, svg_path):
 
 <filter id="shadow">
     <feDropShadow
-        dx="2"
-        dy="2"
-        stdDeviation="2"
-        flood-color="#888888"
-        flood-opacity="0.35"/>
+        dx="1"
+        dy="1"
+        stdDeviation="1"
+        flood-color="#777777"
+        flood-opacity="0.25"/>
 </filter>
 
 </defs>
 '''
 
     # =====================================================
-    # CONTOUR DETECTION ONLY
+    # DRAW CONTOURS
     # =====================================================
-
-    contours, hierarchy = cv2.findContours(
-        cleaned,
-        cv2.RETR_EXTERNAL,
-        cv2.CHAIN_APPROX_TC89_KCOS
-    )
 
     for contour in contours:
 
         area = cv2.contourArea(contour)
 
         # =================================================
-        # REMOVE TINY NOISE
+        # REMOVE SMALL NOISE
         # =================================================
 
-        if area < 80:
+        if area < 60:
             continue
 
         # =================================================
-        # SIMPLIFY CONTOUR
+        # SMOOTH SHAPES
         # =================================================
 
         epsilon = (
-            0.002 *
+            0.003 *
             cv2.arcLength(contour, True)
         )
 
@@ -137,7 +161,7 @@ def image_to_svg(image_path, svg_path):
             continue
 
         # =================================================
-        # MAIN PATH
+        # MAIN SVG PATH
         # =================================================
 
         path = "M "
@@ -151,7 +175,7 @@ def image_to_svg(image_path, svg_path):
         path += "Z"
 
         # =================================================
-        # SHADOW PATH (PSEUDO 3D)
+        # LIGHT SHADOW PATH
         # =================================================
 
         shadow_path = "M "
@@ -160,52 +184,65 @@ def image_to_svg(image_path, svg_path):
 
             x, y = point[0]
 
-            shadow_path += f"{x+2},{y+2} "
+            shadow_path += f"{x+1},{y+1} "
 
         shadow_path += "Z"
 
         # =================================================
-        # SHADOW LAYER
+        # SHADOW
         # =================================================
 
-        svg_content += f'''
+        svg += f'''
 <path
-    d="{shadow_path}"
-    fill="none"
-    stroke="#888888"
-    stroke-width="2"
-    opacity="0.25"
-    stroke-linejoin="round"/>
+ d="{shadow_path}"
+ fill="none"
+ stroke="#888888"
+ stroke-width="1"
+ opacity="0.18"/>
 '''
 
         # =================================================
-        # MAIN VECTOR PATH
+        # MAIN VECTOR
         # =================================================
 
-        svg_content += f'''
+        svg += f'''
 <path
-    d="{path}"
-    fill="none"
-    stroke="black"
-    stroke-width="2"
-    stroke-linecap="round"
-    stroke-linejoin="round"
-    filter="url(#shadow)"/>
+ d="{path}"
+ fill="none"
+ stroke="black"
+ stroke-width="1.6"
+ stroke-linecap="round"
+ stroke-linejoin="round"
+ filter="url(#shadow)"/>
 '''
 
     # =====================================================
-    # SVG FOOTER
+    # SVG END
     # =====================================================
 
-    svg_content += "\n</svg>"
+    svg += "\n</svg>"
 
     # =====================================================
     # SAVE SVG
     # =====================================================
 
-    with open(svg_path, "w", encoding="utf-8") as f:
+    with open(
+        svg_path,
+        "w",
+        encoding="utf-8"
+    ) as f:
 
-        f.write(svg_content)
+        f.write(svg)
+
+
+# =========================================================
+# HOME ROUTE
+# =========================================================
+
+@app.route("/")
+def home():
+
+    return "Smart Lightweight SVG Server Running"
 
 
 # =========================================================
@@ -240,10 +277,18 @@ def convert():
 
     try:
 
+        # =================================================
+        # GENERATE SVG
+        # =================================================
+
         image_to_svg(
             input_path,
             output_path
         )
+
+        # =================================================
+        # READ SVG
+        # =================================================
 
         with open(
             output_path,
@@ -253,6 +298,22 @@ def convert():
 
             svg_text = f.read()
 
+        # =================================================
+        # CLEANUP
+        # =================================================
+
+        if os.path.exists(input_path):
+            os.remove(input_path)
+
+        if os.path.exists(output_path):
+            os.remove(output_path)
+
+        gc.collect()
+
+        # =================================================
+        # RESPONSE
+        # =================================================
+
         return jsonify({
             "success": True,
             "svg": svg_text
@@ -260,20 +321,24 @@ def convert():
 
     except Exception as e:
 
+        # Cleanup even on failure
+        try:
+
+            if os.path.exists(input_path):
+                os.remove(input_path)
+
+            if os.path.exists(output_path):
+                os.remove(output_path)
+
+        except:
+            pass
+
+        gc.collect()
+
         return jsonify({
             "success": False,
             "error": str(e)
         }), 500
-
-
-# =========================================================
-# HOME ROUTE
-# =========================================================
-
-@app.route("/")
-def home():
-
-    return "Advanced SVG Blueprint Server Running"
 
 
 # =========================================================
